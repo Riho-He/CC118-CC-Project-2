@@ -1,0 +1,162 @@
+//
+// Tufts University, CS 118, Fall 2025
+//
+//  Purpose: Defines the Raft RPC protocol using Google's Protocol Buffers
+//  syntax. See https://developers.google.com/protocol-buffers for more details.
+//
+
+syntax = "proto3";
+
+package raft;
+
+// The service that defines what RPC calls Raft supports
+service RaftRPC {
+    // Used when a node in the cluster is first starting up so it can notify a
+    // leader what their listening address is.
+    rpc JoinCaller (RemoteNode) returns (JoinReply) {
+    }
+
+    // Invoked by leader to replicate log entries; also used as a heartbeat
+    // between leaders and followers.
+    rpc AppendEntriesCaller (AppendEntriesRequest) returns (AppendEntriesReply) {
+    }
+
+    // Invoked by candidate nodes to request votes from other nodes.
+    rpc RequestVoteCaller (RequestVoteRequest) returns (RequestVoteReply) {
+    }
+
+    // Called by a client to make a request to a Raft node
+    rpc ClientRequestCaller (ClientRequest) returns (ClientReply) {
+    }
+}
+
+// Important building blocks for the following RPC requests/responses as well as
+// the rest of Raft:
+
+message JoinReply {
+    repeated RemoteNode peers = 1;
+}
+
+// Represents a node in the Raft cluster
+message RemoteNode {
+    string addr = 1;
+    string id = 2;
+}
+
+// A log entry in Raft can be any of any of these four types.
+enum CommandType {
+    NOOP = 0;
+    CLIENT_REGISTRATION = 1;
+    STATE_MACHINE_COMMAND = 2;
+}
+
+message LogEntry {
+    // Index of log entry (first index = 1)
+    uint64 index = 1;
+
+    // The term that this entry was in when added
+    uint64 termId = 2;
+
+    // Type of command associated with this entry
+    CommandType type = 3;
+
+    // Command associated with this log entry in the user's finite-state-machine.
+    // Note that we only care about this value when type = STATE_MACHINE_COMMAND
+    uint64 command = 4;
+
+    // Data associated with this log entry in the user's finite-state-machine.
+    bytes data = 5;
+
+    // After processing this log entry, what ID to use when caching the
+    // response. Use an empty string to not cache at all
+    string cacheId = 6;
+}
+
+message AppendEntriesRequest {
+    // The leader's term
+    uint64 term = 1;
+
+    // Address of the leader sending this request
+    RemoteNode leader = 2;
+
+    // The index of the log entry immediately preceding the new ones
+    uint64 prevLogIndex = 3;
+
+    // The term of the log entry at prevLogIndex
+    uint64 prevLogTerm = 4;
+
+    // The log entries the follower needs to store. Empty for heartbeat messages.
+    repeated LogEntry entries = 5;
+
+    // The leader's commitIndex
+    uint64 leaderCommit = 6;
+}
+
+message AppendEntriesReply {
+    // The current term, for leader to update itself.
+    uint64 term = 1;
+
+    // True if follower contained entry matching prevLogIndex and prevLogTerm.
+    bool success = 2;
+}
+
+message RequestVoteRequest {
+    // The candidate's current term Id
+    uint64 term = 1;
+
+    // The candidate Id currently requesting a node to vote for it.
+    RemoteNode candidate = 2;
+
+    // The index of the candidate's last log entry
+    uint64 lastLogIndex = 3;
+
+    // The term of the candidate's last log entry
+    uint64 lastLogTerm = 4;
+}
+
+message RequestVoteReply {
+    // The current term, for candidate to update itself
+    uint64 term = 1;
+
+    // True means candidate received vote
+    bool voteGranted = 2;
+}
+
+// The possible responses to a client request
+enum ClientStatus {
+    OK = 0;
+    NOT_LEADER = 1;
+    ELECTION_IN_PROGRESS = 2;
+    CLUSTER_NOT_STARTED = 3;
+    REQ_FAILED = 4;
+}
+
+message ClientRequest {
+    // The unique client ID associated with this client session (received
+    // via a previous RegisterClient call).
+    uint64 clientId = 1;
+
+    // A sequence number is associated to request to avoid duplicates
+    uint64 sequenceNum = 2;
+
+    // Command to be executed on the state machine; it may affect state
+    uint64 stateMachineCmd = 4;
+
+    // Data to accompany the command to the state machine; it may affect state
+    bytes data = 5;
+}
+
+message ClientReply {
+    // OK if state machine successfully applied command
+    ClientStatus status = 1;
+
+    // The unique client ID associated with this client session
+    uint64 clientId = 2;
+
+    // State machine output, if successful
+    bytes response = 3;
+
+    // In cases where the client contacted a non-leader, the node should
+    // reply with the correct current leader.
+    RemoteNode leaderHint = 4;
+}
